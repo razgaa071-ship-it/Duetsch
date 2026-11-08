@@ -66,10 +66,8 @@
     
     <!-- VIEW 1: SPEAKING PARTNER -->
     <section id="view-chat" class="p-4 space-y-4">
-      <!-- Topic Selector -->
       <div class="flex gap-2 overflow-x-auto pb-2 no-scrollbar" id="topicPills"></div>
 
-      <!-- Current Topic Card -->
       <div id="topicBanner" class="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 flex items-center justify-between">
         <div>
           <span class="text-[11px] uppercase tracking-wider text-amber-400 font-bold" id="currentTopicLevel">B1/B2 Lektion</span>
@@ -81,16 +79,13 @@
         </button>
       </div>
 
-      <!-- Chat Messages -->
       <div id="chatContainer" class="space-y-3 min-h-[280px]"></div>
 
-      <!-- Suggested B1/B2 Redemittel Quick Replies -->
       <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-3">
         <p class="text-[11px] font-semibold text-slate-400 mb-2">💡 Redemittel-Hilfe (Antippen zum Sprechen):</p>
         <div id="quickReplies" class="flex flex-wrap gap-1.5"></div>
       </div>
 
-      <!-- Microphone & Input Controls -->
       <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3 sticky bottom-20 shadow-xl">
         <div class="flex items-center gap-2">
           <button onclick="toggleSpeechRecognition()" id="micBtn" class="w-12 h-12 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center justify-center text-xl shadow-lg transition shrink-0">
@@ -161,7 +156,7 @@
 
   <script>
     // --- STATE ---
-    let currentGender = localStorage.getItem('dp_gender') || 'female'; // 'female' (Hannah) or 'male' (Lukas)
+    let currentGender = localStorage.getItem('dp_gender') || 'female';
     let secondsSpoken = parseInt(localStorage.getItem('dp_seconds_' + new Date().toDateString()) || '0', 10);
     let timerRunning = false;
     let timerInterval = null;
@@ -353,32 +348,53 @@
     let chatHistory = [];
     let turnCounter = 0;
 
-    // --- VOICE SYNTHESIS (MALE & FEMALE GERMAN) ---
+    // --- ROBUST CLOUD AUDIO ENGINE FOR APK / ANDROID ---
     function speakGerman(text, forceGender = null) {
-      if (!('speechSynthesis' in window)) return;
-      window.speechSynthesis.cancel();
-
       const gender = forceGender || currentGender;
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = 'de-DE';
+      
+      // Dual Engine: Try Web Speech first, then fallback instantly to Google Cloud Audio MP3 stream
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance(text);
+        utter.lang = 'de-DE';
+        utter.pitch = gender === 'male' ? 0.85 : 1.12;
+        utter.rate = 0.95;
 
-      const voices = window.speechSynthesis.getVoices();
-      const deVoices = voices.filter(v => v.lang.toLowerCase().includes('de'));
-
-      if (deVoices.length > 0) {
-        if (gender === 'male') {
-          const maleMatch = deVoices.find(v => /stefan|markus|klaus|male|mann|conrad|killian/i.test(v.name));
-          utter.voice = maleMatch || deVoices[deVoices.length - 1];
-        } else {
-          const femaleMatch = deVoices.find(v => /anna|hedda|katja|female|frau|vicki|petra/i.test(v.name));
-          utter.voice = femaleMatch || deVoices[0];
+        const voices = window.speechSynthesis.getVoices();
+        const deVoices = voices.filter(v => v.lang && v.lang.toLowerCase().includes('de'));
+        if (deVoices.length > 0) {
+          if (gender === 'male') {
+            utter.voice = deVoices.find(v => /stefan|markus|klaus|male|mann|conrad/i.test(v.name)) || deVoices[deVoices.length - 1];
+          } else {
+            utter.voice = deVoices.find(v => /anna|hedda|katja|female|frau|vicki/i.test(v.name)) || deVoices[0];
+          }
         }
-      }
 
-      // Natural pitch distinction so Male (Lukas) & Female (Hannah) always sound distinct on Android
-      utter.pitch = gender === 'male' ? 0.85 : 1.12;
-      utter.rate = 0.96;
-      window.speechSynthesis.speak(utter);
+        // If Web Speech fails or produces no sound in WebView, the audio element fallback triggers automatically
+        utter.onerror = () => playCloudAudio(text);
+        window.speechSynthesis.speak(utter);
+        
+        // Also fire cloud audio backup for APK WebViews if synthesis stays silent
+        setTimeout(() => {
+          if (!window.speechSynthesis.speaking) {
+            playCloudAudio(text);
+          }
+        }, 150);
+      } else {
+        playCloudAudio(text);
+      }
+    }
+
+    function playCloudAudio(text) {
+      try {
+        const encoded = encodeURIComponent(text);
+        // Google Translate TTS MP3 endpoint works reliably inside Android APK WebViews
+        const audioUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encoded}&tl=de&client=tw-ob`;
+        const audio = new Audio(audioUrl);
+        audio.play().catch(e => console.warn('Audio playback restricted', e));
+      } catch (err) {
+        console.warn('Cloud audio error', err);
+      }
     }
 
     function toggleVoiceGender() {
@@ -684,7 +700,6 @@ Gib deine Antwort exakt im JSON-Format zurück:
     }
 
     // Init
-    window.speechSynthesis && window.speechSynthesis.onvoiceschanged !== undefined && (window.speechSynthesis.onvoiceschanged = () => {});
     updateGenderUI();
     updateTimerUI();
     selectTopic(0);
