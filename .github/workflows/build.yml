@@ -1,0 +1,74 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Prepare App Folder & Configs Automatically
+        run: |
+          mkdir -p www
+          if [ -f "DeutschPartner_B1_B2_Mobile.html" ]; then
+            cp DeutschPartner_B1_B2_Mobile.html www/index.html
+          elif [ -f "index.html" ]; then
+            cp index.html www/index.html
+          fi
+          cat << 'EOF' > package.json
+          {
+            "name": "deutschpartner-b1-b2",
+            "version": "1.0.0",
+            "dependencies": {
+              "@capacitor/android": "^6.0.0",
+              "@capacitor/cli": "^6.0.0",
+              "@capacitor/core": "^6.0.0"
+            }
+          }
+          EOF
+          cat << 'EOF' > capacitor.config.json
+          {
+            "appId": "com.deutschpartner.b1b2",
+            "appName": "DeutschPartner B1-B2",
+            "webDir": "www",
+            "server": { "androidScheme": "https" }
+          }
+          EOF
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Capacitor & Build Android Project
+        run: |
+          npm install
+          npx cap add android
+          npx cap sync android
+
+      - name: Add Microphone Permissions
+        run: |
+          sed -i 's/<\/manifest>/<uses-permission android:name="android.permission.RECORD_AUDIO" \/>\n<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" \/>\n<\/manifest>/' android/app/src/main/AndroidManifest.xml
+
+      - name: Build Debug APK
+        working-directory: ./android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload Compiled APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeutschPartner-B1-B2-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
